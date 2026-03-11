@@ -1,122 +1,184 @@
-# Photo Compliance Validator
+# Face Compliance Validator
 
-A computer vision system that checks whether a photograph meets standard requirements before submission to official portals, government applications, or any process that demands a specific photo format.
+> Deep learning pipeline for automated ID and passport photo compliance checking.
+> Trained on CelebA (15,000 images) using transfer learning with MobileNetV2.
+> Deployed as an interactive Streamlit app.
 
-🔗 **Live Demo** → [https://photo-compliance-validator.streamlit.app](https://photo-compliance-validator.streamlit.app)
-
----
-
-## The Problem
-
-Anyone who has filled an online application knows the frustration of getting a photo rejected. The reasons are almost always the same — blurry image, face too small, background not plain, photo too dark, head tilted. These rejections waste time and in many cases cost money when re-submissions involve fees or missed deadlines.
-
-This project automates those checks. Upload your photo and get an instant report telling you exactly what passes and what does not — before you submit anywhere.
+Live App: [paste your URL here](#)
 
 ---
 
-## Where This Is Useful
+## Demo
 
-This is not limited to government exams. Any process that requires a compliant photograph can benefit from this:
+![App Demo](assets/demo.gif)
 
-- **Competitive exam registrations** — UPSC, SSC, JEE, NEET, GATE, IELTS, and similar portals
-- **Passport and visa applications** — strict requirements around face size, background colour, and alignment
-- **Job and internship applications** — company portals and HR systems requiring a professional headshot
-- **University and college admissions** — both domestic and international institutions
-- **Bank account opening and KYC** — photo submissions for identity verification
-- **Driving licence and government ID applications** — transport and civil service portals
-- **Employee onboarding** — verifying that submitted photos meet internal HR standards
-- **Online exam proctoring** — checking the candidate photo before a session begins
-- **Scholarship and fellowship forms** — most require a passport-size photo with specific formatting
+**Compliant Photo**
+![Pass](assets/pass.png)
 
-Basically if a form asks for a photo, this tool can tell you whether yours will be accepted.
-
----
-
-## Checks Performed
-
-| Check | Method | Fails When |
-|---|---|---|
-| Image size | Dimension comparison | Too small or wrong aspect ratio |
-| Blur | Laplacian variance | Image not sharp enough |
-| Brightness | Grayscale mean | Too dark or overexposed |
-| Background | Corner region std-dev | Busy or non-plain background |
-| Face detection | MediaPipe | No face or multiple faces found |
-| Face ratio | MediaPipe bounding box | Face too small or too large in frame |
-| Head tilt | Eye landmark geometry | Tilt beyond allowed degrees |
-| Obstruction | Facial landmark geometry | Mask, sunglasses, or cap detected |
-
----
-
-## Tech Stack
-
-- **OpenCV** — image loading and classical CV operations
-- **MediaPipe** — face detection, face mesh, and landmark extraction
-- **Streamlit** — web interface
-- **Pillow** — image handling in the UI
-
----
-
-## Setup
-
-Python 3.11 is required. MediaPipe does not support Python 3.12 or 3.13 yet.
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-Open [http://localhost:8501](http://localhost:8501) in your browser.
+**Non-Compliant Photo**
+![Fail](assets/fail.png)
 
 ---
 
 ## Project Structure
 ```
-photo_compliance/
-├── validator.py      # all checks and core validation logic
-├── app.py            # streamlit web interface
+face-validator/
+├── train.py                 ← training pipeline (run on Google Colab)
+├── validator.py             ← model loading and inference
+├── app.py                   ← Streamlit app
+├── face_attributes.pt       ← trained model weights
 ├── requirements.txt
-├── README.md
-└── resources/
+├── sample_photos/           ← test photos to try the app
+│   ├── compliant.jpg
+│   ├── glasses.jpg
+│   ├── hat.jpg
+│   └── smiling.jpg
+└── assets/
+    ├── demo.gif
+    ├── pass.png
+    └── fail.png
 ```
 
 ---
 
-## Tuning
+## What It Checks
 
-All threshold values are at the top of `validator.py`. If a check is too strict or too lenient, change the number there — nothing else needs to be touched.
+| Check | Compliance Rule | Accuracy |
+|-------|----------------|----------|
+| Eyeglasses | No glasses allowed | 97% |
+| Headwear | No hat or headwear | 97% |
+| Eyes Open | Eyes must be fully open | 70% |
+| Expression | Neutral expression required | 75% |
+| Gender | Detected as metadata | 90% |
 
-For example if good photos are being rejected for background, raise `BACKGROUND_STD_MAX` from `35` to `50`.
+---
+
+## Dataset
+
+| Property | Detail |
+|----------|--------|
+| Source | CelebA — Large-scale Face Attributes Dataset |
+| Total available | 202,599 face images |
+| Used for training | 15,000 images (sampled) |
+| Split | 12,000 train / 1,500 val / 1,500 test |
+| Attributes available | 40 binary labels |
+| Attributes used | 5 |
+
+CelebA attribute values are -1/1 — converted to 0/1 before training. Class imbalance handled via `pos_weight` in BCEWithLogitsLoss.
+
+---
+
+## Model
+
+**Architecture:** MobileNetV2 (pretrained on ImageNet) + custom classification head
+```
+MobileNetV2 base (frozen)
+    → Dropout(0.3)
+    → Linear(1280, 128)
+    → ReLU
+    → Dropout(0.2)
+    → Linear(128, 5)
+    → Sigmoid (per attribute)
+```
+
+**Why MobileNetV2:**
+Lightweight, fast inference, strong ImageNet features that transfer well to face attribute detection. Freezing the base and training only the head keeps training fast and prevents overfitting on 15k images.
+
+**Loss:** BCEWithLogitsLoss with pos_weight for imbalanced attributes
+**Optimizer:** AdamW (lr=1e-3, weight_decay=1e-4)
+**Scheduler:** ReduceLROnPlateau (patience=2, factor=0.5)
+**Epochs:** 15 | **Batch size:** 64 | **Image size:** 128×128
+**Trainable parameters:** 164,613
+
+---
+
+## Results
+
+### Per-Attribute Performance
+
+| Attribute | Accuracy | Precision | Recall | F1 |
+|-----------|----------|-----------|--------|----|
+| Eyeglasses | 97% | 0.85 | 0.64 | 0.73 |
+| Wearing_Hat | 97% | 0.68 | 0.82 | 0.74 |
+| Smiling | 75% | 0.75 | 0.75 | 0.75 |
+| Male | 90% | 0.90 | 0.90 | 0.90 |
+| Narrow_Eyes | 70% | 0.23 | 0.67 | 0.34 |
+
+Overall test accuracy: **85.79%**
+
+---
+
+## Model Analysis
+
+Eyeglasses and Wearing_Hat both hit 97% accuracy — strong results driven by visually distinct features that MobileNetV2's pretrained filters detect reliably. Smiling at 75% and Male at 90% perform well given balanced class distributions in the dataset.
+
+Narrow_Eyes is the weakest attribute at 70% accuracy with low precision. Two factors explain this — only 11.5% of CelebA images are labeled narrow eyes creating a 9:1 class imbalance, and the annotation itself is subjective in CelebA where annotators disagreed on borderline cases. Applying pos_weight=8.0 improved recall from 1% to 67% but precision remains low at 0.23. In practice this means the model catches most narrow-eye cases but with false positives. For a production system this attribute would benefit from a dedicated eye-openness detector or a cleaner labeled dataset.
 
 ---
 
 ## Limitations
 
-- Obstruction detection uses facial landmark geometry, not a trained classifier. It may not catch very subtle obstructions like a thin scarf or partial coverage.
-- Background check uses corner region sampling, so it works best for standard portrait photos with the subject centred.
-- The system is designed for validation only — it does not correct or edit photos.
+- Trained on celebrity face images — CelebA skews toward certain demographics and lighting conditions. Performance may vary on more diverse real-world photos.
+- Narrow_Eyes precision is low due to class imbalance and label noise in CelebA — see model analysis above.
+- No geometric checks — head tilt, face centering, and background uniformity are not covered by this model. These are better handled by rule-based geometry checks.
+- 15k training samples is sufficient for transfer learning but a larger sample would improve generalization, especially for minority classes.
 
 ---
 
-## Future Scope
+## Extending to a Full Production Pipeline
 
-This project can be extended and applied in several interesting directions:
+This project covers the DL attribute classification component. A complete ID photo compliance system would combine this with:
 
-**Attendance verification**
-The same face compliance checks can be adapted for automated attendance systems — verifying that a live photo taken at login matches a stored compliant photo and is not a printout or screen capture.
+- **Face detection** — MediaPipe or RetinaFace to confirm exactly one face is present and extract the face region before passing to this model
+- **Geometric checks** — OpenCV for head tilt angle, face centering, and image size validation
+- **Background check** — a simple CNN classifier trained on plain vs busy backgrounds
+- **Blur and brightness** — Laplacian variance and mean pixel intensity checks via OpenCV
+- **Domain-specific fine-tuning** — for specific use cases like UPSC forms or passport applications, collecting labeled compliant/non-compliant photos from that domain and fine-tuning this model would significantly improve accuracy over the general CelebA-trained version
 
-**API service**
-Wrap the validator in a FastAPI backend so any application portal can call it programmatically before accepting a photo upload — rejecting non-compliant images at the source.
+The modular design of `validator.py` makes it straightforward to extend — additional checks return the same dictionary structure and plug directly into the app.
 
-**Real-time camera validation**
-Use a webcam feed instead of file upload. Give the user live feedback — "move closer", "too dark", "tilt your head" — before they even take the photo.
+---
 
-**Mobile app**
-Port the logic to a mobile application using TensorFlow Lite or MediaPipe's mobile SDK so users can validate directly from their phone camera.
+## How to Run
 
-**Fine-tuned obstruction classifier**
-Replace the current geometric obstruction check with a proper MobileNetV2 classifier trained on labelled data — mask, sunglasses, cap, clear — for more reliable and accurate detection.
+**Install dependencies:**
+```bash
+pip install -r requirements.txt
+```
 
-**Document photo extraction**
-Automatically crop and extract the photo region from a scanned ID card or form, then run compliance checks on the extracted photo.
+**Run the app:**
+```bash
+streamlit run app.py
+```
 
-**Multi-standard support**
-Different portals have different rules. Add preset profiles — UPSC standard, passport standard, visa standard — so users can validate against the specific requirements of the portal they are submitting to.
+**Try with sample photos:**
+```
+sample_photos/compliant.jpg    ← should pass all checks
+sample_photos/glasses.jpg      ← should fail eyeglasses check
+sample_photos/hat.jpg          ← should fail headwear check
+sample_photos/smiling.jpg      ← should fail expression check
+```
+
+**To retrain the model:**
+Open `train.py` in Google Colab, connect T4 GPU, update the dataset path and run.
+
+---
+
+## Tech Stack
+
+- Python 3.x
+- PyTorch + torchvision
+- Streamlit
+- Pillow
+- scikit-learn
+
+---
+
+## requirements.txt
+```
+torch
+torchvision
+streamlit
+Pillow
+scikit-learn
+```
