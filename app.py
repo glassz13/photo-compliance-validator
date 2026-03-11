@@ -1,172 +1,119 @@
 import streamlit as st
 import tempfile, os
 from PIL import Image
-from validator import validate
+from validator import load_model, predict
 
-st.set_page_config(page_title="Photo Compliance Validator", page_icon="🪪", layout="centered")
+st.set_page_config(page_title="Face Validator", page_icon="🪪", layout="centered")
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+* { font-family: 'Inter', sans-serif; }
 
-* { font-family: 'Space Grotesk', sans-serif; }
-.stApp { background: #1a1a2e; color: #e8e8f0; }
+.stApp { background: #0f0f17; color: #e0e0f0; }
+
+.card {
+    background: #1a1a2e;
+    border: 1px solid #2a2a40;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin: 8px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.card-pass { border-left: 3px solid #34d399; }
+.card-fail { border-left: 3px solid #f87171; }
+.card-info { border-left: 3px solid #60a5fa; }
+
+.card-left { display: flex; flex-direction: column; gap: 3px; }
+.card-label { font-size: 0.82rem; color: #8888aa; font-weight: 500; }
+.card-value { font-size: 0.95rem; color: #e0e0f0; font-weight: 600; }
+.card-msg   { font-size: 0.78rem; color: #f87171; margin-top: 2px; }
+.card-badge-pass { background: #0d2e20; color: #34d399; border-radius: 20px; padding: 4px 12px; font-size: 0.78rem; font-weight: 600; }
+.card-badge-fail { background: #2e0d0d; color: #f87171; border-radius: 20px; padding: 4px 12px; font-size: 0.78rem; font-weight: 600; }
+.card-badge-info { background: #0d1e3e; color: #60a5fa; border-radius: 20px; padding: 4px 12px; font-size: 0.78rem; font-weight: 600; }
 
 .verdict-pass {
-    background: #0f3d2a;
-    border: 1.5px solid #34d399;
-    border-radius: 10px;
-    padding: 16px 22px;
-    text-align: center;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #34d399;
-    margin: 12px 0 16px 0;
+    background: #0d2e20; border: 1px solid #34d399;
+    border-radius: 10px; padding: 14px;
+    text-align: center; color: #34d399;
+    font-size: 1rem; font-weight: 600; margin: 12px 0;
 }
 .verdict-fail {
-    background: #3d1a1a;
-    border: 1.5px solid #f87171;
-    border-radius: 10px;
-    padding: 16px 22px;
-    text-align: center;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 1.1rem;
-    font-weight: 600;
-    color: #f87171;
-    margin: 12px 0 16px 0;
+    background: #2e0d0d; border: 1px solid #f87171;
+    border-radius: 10px; padding: 14px;
+    text-align: center; color: #f87171;
+    font-size: 1rem; font-weight: 600; margin: 12px 0;
 }
-.check-pass {
-    background: #1e2d26;
-    border: 1px solid #2d4a38;
-    border-left: 3px solid #34d399;
-    border-radius: 8px;
-    padding: 10px 14px;
-    margin: 6px 0;
-    overflow: hidden;
-}
-.check-fail {
-    background: #2d1e1e;
-    border: 1px solid #4a2d2d;
-    border-left: 3px solid #f87171;
-    border-radius: 8px;
-    padding: 10px 14px;
-    margin: 6px 0;
-    overflow: hidden;
-}
-.check-name {
-    font-weight: 600;
-    font-size: 0.88rem;
-    color: #e8e8f0;
-    margin-bottom: 3px;
-}
-.check-score {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 0.74rem;
-    color: #7a7a9a;
-    margin-top: 2px;
-}
-.check-msg {
-    font-size: 0.82rem;
-    color: #fca5a5;
-    margin: 4px 0 3px 0;
-    line-height: 1.4;
-}
-.reasons-box {
-    background: #2d1a1a;
-    border: 1px solid #6b3030;
-    border-radius: 8px;
-    padding: 14px 18px;
-    margin-top: 8px;
-}
-.reasons-box p {
-    font-size: 0.84rem;
-    color: #fca5a5;
-    margin: 5px 0;
-    line-height: 1.5;
-}
-.label {
-    font-size: 0.72rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: #6b6b8a;
-    margin: 20px 0 8px 0;
-    padding-bottom: 5px;
-    border-bottom: 1px solid #2a2a3e;
-}
-.empty-state {
-    text-align: center;
-    color: #9090b0;
-    padding: 3rem;
-    border: 1px dashed #6060aa;
-    border-radius: 12px;
-    margin-top: 1rem;
-    font-size: 0.9rem;
-}
+.block-container { padding-top: 2rem; }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("## 🪪 Photo Compliance Validator")
-st.markdown("<p style='font-size:1.1rem; color:#aaa;'>Validate your photo for government & exam applications</p>", unsafe_allow_html=True)
+@st.cache_resource
+def get_model():
+    return load_model("face_attributes.pt")
+
+model = get_model()
+
+st.markdown("## 🪪 Face Compliance Validator")
+st.markdown("<p style='color:#8888aa; font-size:0.95rem;'>Upload a photo to check ID/passport photo compliance</p>", unsafe_allow_html=True)
 st.divider()
 
-uploaded = st.file_uploader("Upload your photo (JPG only, 20KB – 200KB)", type=["jpg", "jpeg"])
-
-if uploaded:
-    size_kb = uploaded.size / 1024
-    if size_kb < 20:
-        st.error(f"File too small ({size_kb:.1f} KB). Minimum size is 20 KB.")
-        st.stop()
-    if size_kb > 200:
-        st.error(f"File too large ({size_kb:.1f} KB). Maximum size is 200 KB.")
-        st.stop()
+uploaded = st.file_uploader("Upload photo (JPG)", type=["jpg", "jpeg"])
 
 if not uploaded:
-    st.markdown('<div class="empty-state">Upload a photo above to validate it</div>', unsafe_allow_html=True)
+    st.markdown("<div style='text-align:center; color:#6060aa; padding:3rem; border:1px dashed #3a3a5a; border-radius:12px; margin-top:1rem;'>Upload a photo to begin</div>", unsafe_allow_html=True)
     st.stop()
 
-col1, col2 = st.columns([1, 1.6], gap="large")
+col1, col2 = st.columns([1, 1.5], gap="large")
 
 with col1:
     image = Image.open(uploaded)
-    st.image(image, width=280)
-    st.caption(f"{image.width} × {image.height} px  |  {uploaded.size // 1024} KB")
+    st.image(image, width=240)
+    st.caption(str(image.width) + " × " + str(image.height) + " px")
 
 with col2:
-    with st.spinner("Running checks..."):
+    with st.spinner("Analysing..."):
         ext = os.path.splitext(uploaded.name)[-1] or ".jpg"
         with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
             tmp.write(uploaded.getbuffer())
             tmp_path = tmp.name
-        result = validate(tmp_path)
+        results = predict(model, tmp_path)
         os.unlink(tmp_path)
 
-    if result["overall"] == "PASS":
+    failures = [v for v in results.values() if v["passed"] is False]
+    if not failures:
         st.markdown('<div class="verdict-pass">✅ &nbsp; PHOTO COMPLIANT</div>', unsafe_allow_html=True)
     else:
-        fail_count = sum(1 for c in result["checks"] if not c["passed"])
+        count    = str(len(failures))
+        suffix   = "s" if len(failures) > 1 else ""
         st.markdown(
-            f'<div class="verdict-fail">❌ &nbsp; NOT COMPLIANT — {fail_count} issue{"s" if fail_count > 1 else ""} found</div>',
+            '<div class="verdict-fail">❌ &nbsp; NOT COMPLIANT — ' + count + ' issue' + suffix + ' found</div>',
             unsafe_allow_html=True
         )
 
-    st.markdown('<div class="label">Check Results</div>', unsafe_allow_html=True)
-    for c in result["checks"]:
-        if c["passed"]:
-            st.markdown(f"""
-            <div class="check-pass">
-                <div class="check-name">✓ &nbsp; {c['name']}</div>
-                <div class="check-score">{c['score']}</div>
-            </div>""", unsafe_allow_html=True)
+    for attr, res in results.items():
+        if res["passed"] is None:
+            css   = "card card-info"
+            badge = '<span class="card-badge-info">' + res["value"] + '</span>'
+        elif res["passed"]:
+            css   = "card card-pass"
+            badge = '<span class="card-badge-pass">✓ Pass</span>'
         else:
-            st.markdown(f"""
-            <div class="check-fail">
-                <div class="check-name">✗ &nbsp; {c['name']}</div>
-                <div class="check-msg">{c['message']}</div>
-                <div class="check-score">{c['score']}</div>
-            </div>""", unsafe_allow_html=True)
+            css   = "card card-fail"
+            badge = '<span class="card-badge-fail">✗ Fail</span>'
 
-    if result["reasons"]:
-        st.markdown('<div class="label">What to fix</div>', unsafe_allow_html=True)
-        items = "".join(f'<p>▸ {r}</p>' for r in result["reasons"])
-        st.markdown(f'<div class="reasons-box">{items}</div>', unsafe_allow_html=True)
+        msg_html = '<div class="card-msg">' + res["msg"] + '</div>' if res["msg"] else ""
+
+        html = (
+            '<div class="' + css + '">'
+            '<div class="card-left">'
+            '<div class="card-label">' + res["label"] + '</div>'
+            '<div class="card-value">' + res["value"] + '</div>'
+            + msg_html +
+            '</div>'
+            + badge +
+            '</div>'
+        )
+        st.markdown(html, unsafe_allow_html=True)
