@@ -1,4 +1,4 @@
-# Face Compliance Validator
+# Photo Compliance Validator
 
 > Deep learning pipeline for automated ID and passport photo compliance checking.
 > Trained on CelebA (15,000 images) using transfer learning with MobileNetV2.
